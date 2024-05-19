@@ -96,6 +96,20 @@ func (f1 *Fraction) Numerator() int64 {
 	return f1.numerator
 }
 
+func (f1 *Fraction) LessThan(f2 Fraction) bool {
+	return (f1.numerator * f2.denominator) < (f2.Numerator() * f1.denominator)
+}
+
+//func (f *Fraction) Abs() *Fraction {
+//	if f.numerator < 0 {
+//		return &Fraction{
+//			numerator:   -f.numerator,
+//			denominator: f.denominator,
+//		}
+//	}
+//	return f
+//}
+
 func abs[T integer](n T) T {
 	if n < 0 {
 		return -n

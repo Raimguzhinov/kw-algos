@@ -1,4 +1,4 @@
-package matrix
+package duo_simplex
 
 import (
 	"bufio"
@@ -22,15 +22,17 @@ func (c *Comparison) String() string {
 	return [...]string{"=", "<=", ">="}[*c]
 }
 
-type Matrix struct {
-	rows, cols, vars      int
-	matrix                [][]*fractional.Fraction
-	comparisons           []Comparison
+type Table struct {
+	Rows, Cols, Vars      int
+	Matrix                [][]*fractional.Fraction
 	Z                     []*fractional.Fraction
 	IsMinimizationProblem bool
+	BasisVars             []int
+	ZFree                 *fractional.Fraction
+	comparisons           []Comparison
 }
 
-func New(r io.Reader) (*Matrix, error) {
+func New(r io.Reader) (*Table, error) {
 	reader := bufio.NewReader(r)
 	var rows, cols, vars int
 	comparisons := make([]Comparison, 0)
@@ -89,9 +91,20 @@ func New(r io.Reader) (*Matrix, error) {
 			return nil, err
 		}
 		Z[j], err = fractional.New(value, 1)
+		if err != nil {
+			return nil, err
+		}
+	}
+	z, err := strconv.ParseInt(parts[vars], 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	ZFree, err := fractional.New(z, 1)
+	if err != nil {
+		return nil, err
 	}
 
-	maxMinSign := parts[vars]
+	maxMinSign := parts[vars+1]
 	var isMinimization bool
 	if maxMinSign == "min" {
 		isMinimization = true
@@ -99,14 +112,16 @@ func New(r io.Reader) (*Matrix, error) {
 		isMinimization = false
 	}
 
-	return &Matrix{
+	return &Table{
 		rows,
 		cols,
 		vars,
 		matrix,
-		comparisons,
 		Z,
 		isMinimization,
+		make([]int, cols),
+		ZFree,
+		comparisons,
 	}, nil
 }
 
@@ -123,16 +138,16 @@ func parseComparison(sign string) (Comparison, error) {
 	}
 }
 
-func (m *Matrix) String() string {
+func (t *Table) String() string {
 	var s string
-	for i := 0; i < m.rows; i++ {
-		for j := 0; j < m.cols; j++ {
-			s += fmt.Sprintf("%*s ", 6, m.matrix[i][j])
+	for i := 0; i < t.Rows; i++ {
+		for j := 0; j < t.Cols; j++ {
+			s += fmt.Sprintf("%*s ", 6, t.Matrix[i][j])
 		}
 		s += "\n"
 	}
 	s += "Z = "
-	for i, z := range m.Z {
+	for i, z := range t.Z {
 		if i == 0 {
 			s += fmt.Sprintf("%s", z)
 		} else {
@@ -143,52 +158,52 @@ func (m *Matrix) String() string {
 	return s
 }
 
-func (m *Matrix) ToCanonicalForm() *Matrix {
+func (t *Table) ToCanonicalForm() *Table {
 	var newColsCnt, beforeNormalization int
 	basis := make(map[int][]*fractional.Fraction)
 	var lasts []*fractional.Fraction
 
-	for i, comparison := range m.comparisons {
+	for i, comparison := range t.comparisons {
 		var b *fractional.Fraction
 
 		switch comparison {
 		case LessThanOrEqualTo:
 			b, _ = fractional.New(1, 1)
-			m.Z = append(m.Z, fractional.ZeroValue)
+			t.Z = append(t.Z, fractional.ZeroValue)
 		case GreaterThanOrEqualTo:
 			b, _ = fractional.New(-1, 1)
-			m.Z = append(m.Z, fractional.ZeroValue)
+			t.Z = append(t.Z, fractional.ZeroValue)
 		default:
 			beforeNormalization++
 		}
 		newColsCnt++
-		last := m.matrix[i][m.vars]
+		last := t.Matrix[i][t.Vars]
 		lasts = append(lasts, last)
-		basis[i] = make([]*fractional.Fraction, m.rows)
-		for j := 0; j < m.rows; j++ {
+		basis[i] = make([]*fractional.Fraction, t.Rows)
+		for j := 0; j < t.Rows; j++ {
 			basis[i][j] = fractional.ZeroValue
 		}
 		basis[i][i] = b
 	}
 	if newColsCnt > 0 {
-		m.cols += newColsCnt
-		for i := 0; i < m.rows; i++ {
-			head := m.matrix[i][:m.vars]
-			tail := append(m.matrix[i][m.vars+1:], basis[i]...)
+		t.Cols += newColsCnt
+		for i := 0; i < t.Rows; i++ {
+			head := t.Matrix[i][:t.Vars]
+			tail := append(t.Matrix[i][t.Vars+1:], basis[i]...)
 			tail = append(tail, lasts[i])
-			m.matrix[i] = append(head, tail...)
-			m.comparisons[i] = EqualTo
+			t.Matrix[i] = append(head, tail...)
+			t.comparisons[i] = EqualTo
 		}
 	}
-	m.matrix = normalizeMatrix(m.matrix)
-	m.cols -= beforeNormalization
-	if m.IsMinimizationProblem {
-		for i := 0; i < m.cols-1; i++ {
+	t.Matrix = normalizeMatrix(t.Matrix)
+	t.Cols -= beforeNormalization
+	if t.IsMinimizationProblem {
+		for i := 0; i < t.Cols-1; i++ {
 			reverse, _ := fractional.New(-1, 1)
-			m.Z[i] = m.Z[i].Multiply(*reverse)
+			t.Z[i] = t.Z[i].Multiply(*reverse)
 		}
 	}
-	return m
+	return t
 }
 
 func normalizeMatrix(matrix [][]*fractional.Fraction) [][]*fractional.Fraction {
@@ -217,27 +232,26 @@ func normalizeMatrix(matrix [][]*fractional.Fraction) [][]*fractional.Fraction {
 	return result
 }
 
-func (m *Matrix) ToBasis() (*Matrix, error) {
+func (t *Table) ToBasis() (*Table, error) {
 	var columOfResolver int
-	for i := 0; i < m.rows; i++ {
+	for i := 0; i < t.Rows; i++ {
 
-		m.swapMatrixRows(i, columOfResolver)
+		t.swapMatrixRows(i, columOfResolver)
 		needToCheck := false
-		//newMatrix := m.matrix
-		newMatrix := make([][]*fractional.Fraction, m.rows)
+		newMatrix := make([][]*fractional.Fraction, t.Rows)
 		for r := range newMatrix {
-			newMatrix[r] = make([]*fractional.Fraction, m.cols)
-			copy(newMatrix[r], m.matrix[r])
+			newMatrix[r] = make([]*fractional.Fraction, t.Cols)
+			copy(newMatrix[r], t.Matrix[r])
 		}
 
 		currentColumOfResolver := columOfResolver
-		if m.matrix[i][currentColumOfResolver].Equal(*fractional.ZeroValue) {
+		if t.Matrix[i][currentColumOfResolver].Equal(*fractional.ZeroValue) {
 			needToCheck = true
-			for j := currentColumOfResolver + 1; j < m.cols-1; j++ {
-				m.swapMatrixRows(i, j)
+			for j := currentColumOfResolver + 1; j < t.Cols-1; j++ {
+				t.swapMatrixRows(i, j)
 
-				if !m.matrix[i][j].Equal(*fractional.ZeroValue) {
-					newMatrix = m.matrix
+				if !t.Matrix[i][j].Equal(*fractional.ZeroValue) {
+					newMatrix = t.Matrix
 					needToCheck = false
 					columOfResolver = j + 1
 					currentColumOfResolver = j
@@ -245,78 +259,79 @@ func (m *Matrix) ToBasis() (*Matrix, error) {
 					break
 				}
 			}
-			if needToCheck && m.matrix[i][m.cols-1].Equal(*fractional.ZeroValue) {
-				rank, err := m.checkRank()
+			if needToCheck && t.Matrix[i][t.Cols-1].Equal(*fractional.ZeroValue) {
+				rank, err := t.checkRank()
 				if err != nil {
 					return nil, err
 				}
-				if i == m.rows-1 && rank == 1 {
-					return m, nil
+				if i == t.Rows-1 && rank == 1 {
+					return t, nil
 				}
 				continue
 			} else if currentColumOfResolver == columOfResolver {
-				_, err := m.checkRank()
+				_, err := t.checkRank()
 				if err != nil {
 					return nil, err
 				}
-				return m, err
+				return t, err
 			}
 		} else {
 			columOfResolver++
 		}
 
 		reverse, _ := fractional.New(-1, 1)
-		if !m.matrix[i][currentColumOfResolver].Equal(*reverse) {
-			divider := m.matrix[i][currentColumOfResolver]
-			for j := 0; j < m.cols; j++ {
+		if !t.Matrix[i][currentColumOfResolver].Equal(*reverse) {
+			divider := t.Matrix[i][currentColumOfResolver]
+			for j := 0; j < t.Cols; j++ {
 				var err error
-				newMatrix[i][j], err = m.matrix[i][j].Divide(*divider)
+				newMatrix[i][j], err = t.Matrix[i][j].Divide(*divider)
 				if err != nil {
 					return nil, err
 				}
 			}
 		}
 
-		if err := m.methodRectangle(newMatrix, i, currentColumOfResolver); err != nil {
+		t.BasisVars[i] = currentColumOfResolver
+		if err := t.methodRectangle(newMatrix, i, currentColumOfResolver); err != nil {
 			return nil, err
 		}
-		m.matrix = newMatrix
+		t.Matrix = newMatrix
 
-		if i == m.rows-1 || needToCheck {
-			_, err := m.checkRank()
+		if i == t.Rows-1 || needToCheck {
+			_, err := t.checkRank()
 			if err != nil {
 				return nil, err
 			}
-			return m, err
+			return t, err
 		}
 	}
-	return m, nil
+	return t, nil
 }
 
-func (m *Matrix) swapMatrixRows(startRow, startColumn int) {
-	maxValue := math.Abs(m.matrix[startRow][startColumn].Float64())
+func (t *Table) swapMatrixRows(startRow, startColumn int) {
+	maxValue := math.Abs(t.Matrix[startRow][startColumn].Float64())
 	maxIndex := startRow
-	for j := startRow; j < m.rows; j++ {
-		if maxValue < math.Abs(m.matrix[j][startColumn].Float64()) {
-			maxValue = math.Abs(m.matrix[j][startColumn].Float64())
+	for j := startRow; j < t.Rows; j++ {
+		if maxValue < math.Abs(t.Matrix[j][startColumn].Float64()) {
+			maxValue = math.Abs(t.Matrix[j][startColumn].Float64())
 			maxIndex = j
 		}
 	}
 	if maxIndex != startRow {
-		copyRow := make([]*fractional.Fraction, m.cols)
-		copy(copyRow, m.matrix[startRow])
-		m.matrix[startRow] = m.matrix[maxIndex]
-		m.matrix[maxIndex] = copyRow
+		copyRow := make([]*fractional.Fraction, t.Cols)
+		copy(copyRow, t.Matrix[startRow])
+		t.Matrix[startRow] = t.Matrix[maxIndex]
+		t.Matrix[maxIndex] = copyRow
 	}
 }
 
-func (m *Matrix) checkRank() (int, error) {
+func (t *Table) checkRank() (int, error) {
 	var rank, extendedRank int
 
-	for _, rows := range m.matrix {
+	for _, rows := range t.Matrix {
 		counter := 0
 
-		for j := 0; j < m.cols-1; j++ {
+		for j := 0; j < t.Cols-1; j++ {
 			if !rows[j].Equal(*fractional.ZeroValue) {
 				counter++
 			}
@@ -324,47 +339,47 @@ func (m *Matrix) checkRank() (int, error) {
 		if counter != 0 {
 			rank++
 			extendedRank++
-		} else if !rows[m.cols-1].Equal(*fractional.ZeroValue) {
+		} else if !rows[t.Cols-1].Equal(*fractional.ZeroValue) {
 			extendedRank++
 		}
 	}
 
 	if rank != extendedRank {
 		return -1, fmt.Errorf("no solution")
-	} else if rank < m.cols-1 {
+	} else if rank < t.Cols-1 {
 		return 1, nil
 	}
 	return 0, nil
 }
 
-func (m *Matrix) methodRectangle(newMatrix [][]*fractional.Fraction, resolverRow, resolverColumn int) error {
-	for i := 0; i < m.rows; i++ {
+func (t *Table) methodRectangle(newMatrix [][]*fractional.Fraction, resolverRow, resolverColumn int) error {
+	for i := 0; i < t.Rows; i++ {
 		if i == resolverRow {
 			continue
 		}
-		for j := resolverColumn; j < m.cols; j++ {
+		for j := resolverColumn; j < t.Cols; j++ {
 			if j == resolverColumn && i != resolverRow {
 				newMatrix[i][j] = fractional.ZeroValue
 			} else {
-				subexpression, err := m.matrix[i][resolverColumn].Multiply(*m.matrix[resolverRow][j]).Divide(*m.matrix[resolverRow][resolverColumn])
+				subexpression, err := t.Matrix[i][resolverColumn].Multiply(*t.Matrix[resolverRow][j]).Divide(*t.Matrix[resolverRow][resolverColumn])
 				if err != nil {
 					return err
 				}
-				newMatrix[i][j] = m.matrix[i][j].Subtract(*subexpression)
+				newMatrix[i][j] = t.Matrix[i][j].Subtract(*subexpression)
 			}
 		}
 	}
 	return nil
 }
 
-func (m *Matrix) ToNegativeRightSide() *Matrix {
-	for _, rows := range m.matrix {
-		if rows[m.cols-1 : m.cols][0].Numerator() > 0 {
+func (t *Table) ToNegativeRightSide() *Table {
+	for _, rows := range t.Matrix {
+		if rows[t.Cols-1 : t.Cols][0].Numerator() > 0 {
 			for j, cols := range rows {
 				reverse, _ := fractional.New(-1, 1)
 				rows[j] = cols.Multiply(*reverse)
 			}
 		}
 	}
-	return m
+	return t
 }
