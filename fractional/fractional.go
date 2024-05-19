@@ -84,7 +84,8 @@ func (f *Fraction) String() string {
 	if f.denominator == 1 {
 		return fmt.Sprintf("%d", f.numerator)
 	}
-	return fmt.Sprintf("%d/%d", f.numerator, f.denominator)
+	gcf := gcd(abs(f.numerator), f.denominator)
+	return fmt.Sprintf("%d/%d", f.numerator/gcf, f.denominator/gcf)
 }
 
 func (f1 *Fraction) Denominator() int64 {

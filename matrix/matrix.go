@@ -223,7 +223,12 @@ func (m *Matrix) ToBasis() (*Matrix, error) {
 
 		m.swapMatrixRows(i, columOfResolver)
 		needToCheck := false
-		newMatrix := m.matrix
+		//newMatrix := m.matrix
+		newMatrix := make([][]*fractional.Fraction, m.rows)
+		for r := range newMatrix {
+			newMatrix[r] = make([]*fractional.Fraction, m.cols)
+			copy(newMatrix[r], m.matrix[r])
+		}
 
 		currentColumOfResolver := columOfResolver
 		if m.matrix[i][currentColumOfResolver].Equal(*fractional.ZeroValue) {
@@ -298,7 +303,8 @@ func (m *Matrix) swapMatrixRows(startRow, startColumn int) {
 		}
 	}
 	if maxIndex != startRow {
-		copyRow := m.matrix[startRow]
+		copyRow := make([]*fractional.Fraction, m.cols)
+		copy(copyRow, m.matrix[startRow])
 		m.matrix[startRow] = m.matrix[maxIndex]
 		m.matrix[maxIndex] = copyRow
 	}
