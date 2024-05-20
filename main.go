@@ -18,24 +18,23 @@ func main() {
 	var r io.Reader
 	r = f
 
-	t, err := simplex.Scan(r)
+	m, err := simplex.Scan(r)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("%s\n", t.ToCanonicalForm())
-	fmt.Println("Jordaan Gauss:")
-	basis, err := t.ToBasis()
+	fmt.Printf("%s\n", m.ToCanonicalForm())
+	fmt.Println("Jordan Gauss:")
+	table, err := m.ToBasis()
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("%s\n", t)
+	fmt.Printf("%s\n", m)
 
 	fmt.Println("Dual Simplex method:")
-	simplexTable := simplex.New(basis)
-	result, err := simplexTable.DualMethod()
-	if err != nil {
+	simplexTable := simplex.New(table)
+
+	if err := simplexTable.DualMethod(); err != nil {
 		panic(err)
 	}
-	fmt.Println(result)
 }

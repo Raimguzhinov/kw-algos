@@ -119,7 +119,7 @@ func Scan(r io.Reader) (*Table, error) {
 		matrix,
 		Z,
 		isMinimization,
-		make([]int, cols),
+		make([]int, rows),
 		ZFree,
 		comparisons,
 	}, nil
@@ -225,6 +225,7 @@ func normalizeMatrix(matrix [][]*fractional.Fraction) [][]*fractional.Fraction {
 func (t *Table) ToBasis() (*Table, error) {
 	var columOfResolver int
 	for i := 0; i < t.Rows; i++ {
+		fmt.Println(t)
 
 		t.swapMatrixRows(i, columOfResolver)
 		needToCheck := false
@@ -398,4 +399,10 @@ func (t *Table) CopyZFree() *fractional.Fraction {
 		t.ZFree.Denominator(),
 	)
 	return newZFree
+}
+
+func (t *Table) CopyBasisVars() []int {
+	newBasisVars := make([]int, len(t.BasisVars))
+	copy(newBasisVars, t.BasisVars)
+	return newBasisVars
 }
