@@ -3,6 +3,7 @@ package fractional
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 type Fraction struct {
@@ -19,8 +20,19 @@ var (
 	ErrZeroDenominator = errors.New("denominator cannot be zero")
 
 	ZeroValue = &Fraction{
-		numerator:   0,
-		denominator: 1,
+		numerator: 0, denominator: 1,
+	}
+	RevOneValue = &Fraction{
+		numerator: -1, denominator: 1,
+	}
+	OneValue = &Fraction{
+		numerator: 1, denominator: 1,
+	}
+	MinValue = &Fraction{
+		numerator: math.MinInt64, denominator: 1,
+	}
+	MaxValue = &Fraction{
+		numerator: math.MaxInt64, denominator: 1,
 	}
 )
 
@@ -48,10 +60,11 @@ func New[T, K integer](numerator T, denominator K) (*Fraction, error) {
 
 func (f1 *Fraction) Add(f2 Fraction) *Fraction {
 	m := lcm(f1.denominator, f2.denominator)
-	return &Fraction{
+	sum := &Fraction{
 		numerator:   f1.numerator*(m/f1.denominator) + f2.numerator*(m/f2.denominator),
 		denominator: m,
 	}
+	return sum.shrink()
 }
 
 func (f1 *Fraction) Divide(f2 Fraction) (*Fraction, error) {
@@ -59,24 +72,29 @@ func (f1 *Fraction) Divide(f2 Fraction) (*Fraction, error) {
 	if err != nil {
 		err = ErrDivideByZero
 	}
-	return f, err
+	return f.shrink(), err
 }
 
 func (f1 *Fraction) Equal(f2 Fraction) bool {
 	return f1.numerator == f2.numerator && f1.denominator == f2.denominator
 }
 
+func (f1 *Fraction) NotEqual(f2 Fraction) bool {
+	return !f1.Equal(f2)
+}
+
 func (f1 *Fraction) Multiply(f2 Fraction) *Fraction {
 	f, _ := New(f1.numerator*f2.numerator, f1.denominator*f2.denominator)
-	return f
+	return f.shrink()
 }
 
 func (f1 *Fraction) Subtract(f2 Fraction) *Fraction {
 	f2.numerator *= -1
-	return f1.Add(f2)
+	return f1.Add(f2).shrink()
 }
 
 func (f *Fraction) Float64() float64 {
+	f = f.shrink()
 	return float64(f.numerator) / float64(f.denominator)
 }
 
@@ -84,8 +102,13 @@ func (f *Fraction) String() string {
 	if f.denominator == 1 {
 		return fmt.Sprintf("%d", f.numerator)
 	}
+	f = f.shrink()
+	return fmt.Sprintf("%d/%d", f.numerator, f.denominator)
+}
+
+func (f *Fraction) shrink() *Fraction {
 	gcf := gcd(abs(f.numerator), f.denominator)
-	return fmt.Sprintf("%d/%d", f.numerator/gcf, f.denominator/gcf)
+	return &Fraction{f.numerator / gcf, f.denominator / gcf}
 }
 
 func (f1 *Fraction) Denominator() int64 {
@@ -100,15 +123,23 @@ func (f1 *Fraction) LessThan(f2 Fraction) bool {
 	return (f1.numerator * f2.denominator) < (f2.Numerator() * f1.denominator)
 }
 
-//func (f *Fraction) Abs() *Fraction {
-//	if f.numerator < 0 {
-//		return &Fraction{
-//			numerator:   -f.numerator,
-//			denominator: f.denominator,
-//		}
-//	}
-//	return f
-//}
+func (f1 *Fraction) GreaterThan(f2 Fraction) bool {
+	return (f1.numerator * f2.denominator) > (f2.Numerator() * f1.denominator)
+}
+
+func (f *Fraction) Reverse() *Fraction {
+	return f.Multiply(*RevOneValue).shrink()
+}
+
+func (f *Fraction) Abs() *Fraction {
+	if f.numerator < 0 {
+		return &Fraction{
+			numerator:   -f.numerator,
+			denominator: f.denominator,
+		}
+	}
+	return f.shrink()
+}
 
 func abs[T integer](n T) T {
 	if n < 0 {

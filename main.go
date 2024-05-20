@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
-	"kw-algos/duo_simplex"
+	"kw-algos/simplex"
 	"os"
 )
 
@@ -17,14 +17,25 @@ func main() {
 	defer f.Close()
 	var r io.Reader
 	r = f
-	m, err := duo_simplex.New(r)
+
+	t, err := simplex.Scan(r)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("%s\n", m.ToCanonicalForm())
-	basis, err := m.ToBasis()
+
+	fmt.Printf("%s\n", t.ToCanonicalForm())
+	fmt.Println("Jordaan Gauss:")
+	basis, err := t.ToBasis()
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(duo_simplex.SimplexMethod(basis))
+	fmt.Printf("%s\n", t)
+
+	fmt.Println("Dual Simplex method:")
+	simplexTable := simplex.New(basis)
+	result, err := simplexTable.DualMethod()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(result)
 }

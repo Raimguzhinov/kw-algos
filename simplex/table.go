@@ -1,4 +1,4 @@
-package duo_simplex
+package simplex
 
 import (
 	"bufio"
@@ -32,7 +32,7 @@ type Table struct {
 	comparisons           []Comparison
 }
 
-func New(r io.Reader) (*Table, error) {
+func Scan(r io.Reader) (*Table, error) {
 	reader := bufio.NewReader(r)
 	var rows, cols, vars int
 	comparisons := make([]Comparison, 0)
@@ -142,19 +142,10 @@ func (t *Table) String() string {
 	var s string
 	for i := 0; i < t.Rows; i++ {
 		for j := 0; j < t.Cols; j++ {
-			s += fmt.Sprintf("%*s ", 6, t.Matrix[i][j])
+			s += fmt.Sprintf("%*s ", 8, t.Matrix[i][j])
 		}
 		s += "\n"
 	}
-	s += "Z = "
-	for i, z := range t.Z {
-		if i == 0 {
-			s += fmt.Sprintf("%s", z)
-		} else {
-			s += fmt.Sprintf("%*s", 7, z)
-		}
-	}
-	s += "\n"
 	return s
 }
 
@@ -168,10 +159,10 @@ func (t *Table) ToCanonicalForm() *Table {
 
 		switch comparison {
 		case LessThanOrEqualTo:
-			b, _ = fractional.New(1, 1)
+			b = fractional.OneValue
 			t.Z = append(t.Z, fractional.ZeroValue)
 		case GreaterThanOrEqualTo:
-			b, _ = fractional.New(-1, 1)
+			b = fractional.RevOneValue
 			t.Z = append(t.Z, fractional.ZeroValue)
 		default:
 			beforeNormalization++
@@ -199,8 +190,7 @@ func (t *Table) ToCanonicalForm() *Table {
 	t.Cols -= beforeNormalization
 	if t.IsMinimizationProblem {
 		for i := 0; i < t.Cols-1; i++ {
-			reverse, _ := fractional.New(-1, 1)
-			t.Z[i] = t.Z[i].Multiply(*reverse)
+			t.Z[i] = t.Z[i].Reverse()
 		}
 	}
 	return t
@@ -238,11 +228,7 @@ func (t *Table) ToBasis() (*Table, error) {
 
 		t.swapMatrixRows(i, columOfResolver)
 		needToCheck := false
-		newMatrix := make([][]*fractional.Fraction, t.Rows)
-		for r := range newMatrix {
-			newMatrix[r] = make([]*fractional.Fraction, t.Cols)
-			copy(newMatrix[r], t.Matrix[r])
-		}
+		newMatrix := t.CopyMatrix()
 
 		currentColumOfResolver := columOfResolver
 		if t.Matrix[i][currentColumOfResolver].Equal(*fractional.ZeroValue) {
@@ -279,8 +265,7 @@ func (t *Table) ToBasis() (*Table, error) {
 			columOfResolver++
 		}
 
-		reverse, _ := fractional.New(-1, 1)
-		if !t.Matrix[i][currentColumOfResolver].Equal(*reverse) {
+		if t.Matrix[i][currentColumOfResolver].NotEqual(*fractional.RevOneValue) {
 			divider := t.Matrix[i][currentColumOfResolver]
 			for j := 0; j < t.Cols; j++ {
 				var err error
@@ -352,16 +337,16 @@ func (t *Table) checkRank() (int, error) {
 	return 0, nil
 }
 
-func (t *Table) methodRectangle(newMatrix [][]*fractional.Fraction, resolverRow, resolverColumn int) error {
+func (t *Table) methodRectangle(newMatrix [][]*fractional.Fraction, resolveRow, resolveColumn int) error {
 	for i := 0; i < t.Rows; i++ {
-		if i == resolverRow {
+		if i == resolveRow {
 			continue
 		}
-		for j := resolverColumn; j < t.Cols; j++ {
-			if j == resolverColumn && i != resolverRow {
+		for j := resolveColumn; j < t.Cols; j++ {
+			if j == resolveColumn && i != resolveRow {
 				newMatrix[i][j] = fractional.ZeroValue
 			} else {
-				subexpression, err := t.Matrix[i][resolverColumn].Multiply(*t.Matrix[resolverRow][j]).Divide(*t.Matrix[resolverRow][resolverColumn])
+				subexpression, err := t.Matrix[i][resolveColumn].Multiply(*t.Matrix[resolveRow][j]).Divide(*t.Matrix[resolveRow][resolveColumn])
 				if err != nil {
 					return err
 				}
@@ -376,10 +361,41 @@ func (t *Table) ToNegativeRightSide() *Table {
 	for _, rows := range t.Matrix {
 		if rows[t.Cols-1 : t.Cols][0].Numerator() > 0 {
 			for j, cols := range rows {
-				reverse, _ := fractional.New(-1, 1)
-				rows[j] = cols.Multiply(*reverse)
+				rows[j] = cols.Reverse()
 			}
 		}
 	}
 	return t
+}
+
+func (t *Table) IsContainedInBasis(index int) bool {
+	for _, basisVar := range t.BasisVars {
+		if index == basisVar {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *Table) CopyMatrix() [][]*fractional.Fraction {
+	newMatrix := make([][]*fractional.Fraction, t.Rows)
+	for r := range newMatrix {
+		newMatrix[r] = make([]*fractional.Fraction, t.Cols)
+		copy(newMatrix[r], t.Matrix[r])
+	}
+	return newMatrix
+}
+
+func (t *Table) CopyZ() []*fractional.Fraction {
+	newZ := make([]*fractional.Fraction, t.Cols-1)
+	copy(newZ, t.Z)
+	return newZ
+}
+
+func (t *Table) CopyZFree() *fractional.Fraction {
+	newZFree, _ := fractional.New(
+		t.ZFree.Numerator(),
+		t.ZFree.Denominator(),
+	)
+	return newZFree
 }
