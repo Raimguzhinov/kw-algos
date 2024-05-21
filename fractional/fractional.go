@@ -3,7 +3,6 @@ package fractional
 import (
 	"errors"
 	"fmt"
-	"math"
 )
 
 type Fraction struct {
@@ -27,12 +26,6 @@ var (
 	}
 	OneValue = &Fraction{
 		numerator: 1, denominator: 1,
-	}
-	MinValue = &Fraction{
-		numerator: math.MinInt64, denominator: 1,
-	}
-	MaxValue = &Fraction{
-		numerator: math.MaxInt64, denominator: 1,
 	}
 )
 

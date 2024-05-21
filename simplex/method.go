@@ -10,18 +10,30 @@ type Methods interface {
 }
 
 type Method struct {
-	Table *Table
-	CO    []*fractional.Fraction
+	Table        *Table
+	CO           []*fractional.Fraction
+	isDualMethod bool
 }
 
 func New(table *Table) *Method {
-	return &Method{Table: table}
+	return &Method{
+		Table:        table,
+		isDualMethod: true,
+	}
 }
 
 func (m *Method) String() string {
 	var s string
 	var offset = 8
 
+	s += fmt.Sprintf(" B.V%*s%*d%*s", 2, "|", offset, 1, 2, "|")
+	for i := range m.Table.Cols - 1 {
+		s += fmt.Sprintf("%*sx%d%*s", offset/2, "", i+1, offset/2-2, "")
+	}
+	if !m.isDualMethod {
+		s += " |	CO"
+	}
+	s += "\n"
 	for i := 0; i < m.Table.Rows; i++ {
 		s += fmt.Sprintf(" x%d%*s", m.Table.BasisVars[i]+1, 3, "|")
 		s += fmt.Sprintf("%*s", offset, m.Table.Matrix[i][m.Table.Cols-1])
@@ -32,6 +44,14 @@ func (m *Method) String() string {
 				offset = 5
 			}
 			s += fmt.Sprintf("%*s", offset, m.Table.Matrix[i][j])
+		}
+		if !m.isDualMethod {
+			s += fmt.Sprintf("%*s", offset-3, "|")
+			if m.CO[i] == nil {
+				s += fmt.Sprintf("%*s", offset, "-")
+			} else {
+				s += fmt.Sprintf("%*s", offset, m.CO[i])
+			}
 		}
 		s += "\n"
 	}
@@ -45,19 +65,23 @@ func (m *Method) String() string {
 		}
 		s += fmt.Sprintf("%*s", offset, z)
 	}
-	s += fmt.Sprintf("\n CO%*s%*s%*s", 3, "|", offset, "", 2, "|")
-	for i, co := range m.CO {
-		offset := offset
-		if co == nil {
-			if i == 0 {
-				offset = 5
-			}
-			s += fmt.Sprintf("%*s", offset, "-")
-		} else {
-			if i == 0 {
-				offset = 5
+	if m.isDualMethod {
+		s += fmt.Sprintf("\n CO%*s%*s%*s", 3, "|", offset, "", 2, "|")
+
+		for i, co := range m.CO {
+			offset := offset
+			if co == nil {
+				if i == 0 {
+					offset = 5
+				}
+				s += fmt.Sprintf("%*s", offset, "-")
 			} else {
-				s += fmt.Sprintf("%*s", offset, co)
+				if i == 0 {
+					offset = 5
+					s += fmt.Sprintf("%*s", offset, co)
+				} else {
+					s += fmt.Sprintf("%*s", offset, co)
+				}
 			}
 		}
 	}
@@ -71,28 +95,49 @@ func (m *Method) DualMethod() error {
 	var infinityCopyTable *Table
 
 	for {
-		maxValue := fractional.MaxValue
 		var resolveRow, resolveColumn int
+
 		isOptimal := true
 		isZStringIsNegative := false
-		//isNotBasisValueEqualZero := false
+		isResolveRowIsNegative := false    //	Для двойственного симплекс метода
+		isResolveColumnIsPositive := false //	Для стандартного симплекс метода
 
+		//	В столбце свободных членов ищем самый минимальный отрицательный элемент
+		//	если такого нет ставим 1ый признак оптимальности
+		var maxValue *fractional.Fraction
+		prepareMaxValue := false
 		for i := range m.Table.Rows {
-			if m.Table.Matrix[i][m.Table.Cols-1].LessThan(
-				*fractional.ZeroValue,
-			) && maxValue.GreaterThan(*m.Table.Matrix[i][m.Table.Cols-1]) {
-				maxValue = m.Table.Matrix[i][m.Table.Cols-1]
-				resolveRow = i
-				isOptimal = false
+			if m.Table.Matrix[i][m.Table.Cols-1].LessThan(*fractional.ZeroValue) {
+				if !prepareMaxValue {
+					prepareMaxValue = true
+					maxValue = m.Table.Matrix[i][m.Table.Cols-1]
+					resolveRow = i
+					isOptimal = false
+				} else {
+					if maxValue.GreaterThan(*m.Table.Matrix[i][m.Table.Cols-1]) {
+						maxValue = m.Table.Matrix[i][m.Table.Cols-1]
+						resolveRow = i
+						isOptimal = false
+					}
+				}
 			}
 		}
+
+		//	В Z-строке ищем нет ли нулей (признак того что решение не единственое)
+		//	параллельно проверяем есть ли в строке отрицателные элементы
+		// 	(если есть отриц. элемент и при этом 1ый признак оптимальности присутствует, нужно применить обычный симплекс метод)
+		minNegativeZValueIndex := 0
 		for i, z := range m.Table.Z {
 			if z.LessThan(*fractional.ZeroValue) {
 				isZStringIsNegative = true
-			} else if z.Equal(*fractional.ZeroValue) && !m.Table.IsContainedInBasis(i) {
+				if m.Table.Z[minNegativeZValueIndex].GreaterThan(*z) {
+					minNegativeZValueIndex = i
+				}
+			} else if _, ok := m.Table.IsContainedInBasis(i); z.Equal(*fractional.ZeroValue) && !ok {
 				resolveColumn = i
 				if InfinityCycles == 1 {
 					linearCombinations(m.Table, infinityCopyTable)
+					m.printAnswer()
 					return nil
 				}
 				InfinityCycles++
@@ -105,59 +150,65 @@ func (m *Method) DualMethod() error {
 					Matrix:    m.Table.CopyMatrix(),
 					BasisVars: m.Table.CopyBasisVars(),
 				}
+				break
 			}
 		}
-		if !isZStringIsNegative && InfinityCycles == -1 {
+
+		//	Если есть 1ый признак оптиальности, Z-строка положительная и нет признака того что реш. не единственно - Получено оптимальное решение!
+		if isOptimal && !isZStringIsNegative && InfinityCycles == -1 {
 			fmt.Println(m)
-			fmt.Printf("\n")
+			m.printAnswer()
 			return nil
 		}
 
-		m.CO = make([]*fractional.Fraction, m.Table.Cols-1)
-		isResolveRowIsNegative := false
-		for j := range m.Table.Cols - 1 {
-			if m.Table.Matrix[resolveRow][j].LessThan(*fractional.ZeroValue) {
-				isResolveRowIsNegative = true
-				divide, err := m.Table.Z[j].Divide(*m.Table.Matrix[resolveRow][j])
-				if err != nil {
-					return err
+		if !isOptimal {
+			// Вычисление двойственных CO
+			m.CO = make([]*fractional.Fraction, m.Table.Cols-1)
+			for j := range m.Table.Cols - 1 {
+				if m.Table.Matrix[resolveRow][j].LessThan(*fractional.ZeroValue) {
+					isResolveRowIsNegative = true
+					divide, err := m.Table.Z[j].Divide(*m.Table.Matrix[resolveRow][j])
+					if err != nil {
+						return err
+					}
+					m.CO[j] = divide.Abs()
 				}
-				m.CO[j] = divide.Abs()
 			}
+			fmt.Println(m)
+		} else {
+			// Вычисление обычных CO
+			if InfinityCycles == -1 {
+				resolveColumn = minNegativeZValueIndex
+			}
+			m.CO = make([]*fractional.Fraction, m.Table.Rows)
+			var err error
+			for i := range m.Table.Rows {
+				if m.Table.Matrix[i][resolveColumn].GreaterThan(*fractional.ZeroValue) {
+					isResolveColumnIsPositive = true
+					m.CO[i], err = m.Table.Matrix[i][m.Table.Cols-1].Divide(*m.Table.Matrix[i][resolveColumn])
+					if err != nil {
+						return err
+					}
+				}
+			}
+			m.isDualMethod = false
+			fmt.Println(m)
 		}
-
-		fmt.Println(m)
 		fmt.Printf("\n")
 
+		if isOptimal && !isResolveColumnIsPositive {
+			return fmt.Errorf("no solutions\n")
+		}
 		if !isResolveRowIsNegative && InfinityCycles == -1 {
-			if isOptimal {
-				fmt.Println(m)
-				fmt.Printf("\n")
-				panic("VIHOD 2!!!")
-			} else {
-				panic("NO SOLUTION!!!")
-			}
-		} else {
-			maxValue := fractional.MaxValue
-			for i := range m.Table.Rows {
-				if maxValue.GreaterThan(*m.Table.Matrix[i][m.Table.Cols-1]) {
-					maxValue = m.Table.Matrix[i][m.Table.Cols-1]
-					resolveRow = i
-				}
+			if !isOptimal {
+				return fmt.Errorf("no solutions\n")
 			}
 		}
 
-		if InfinityCycles == -1 {
-			minElem := fractional.MaxValue
-			for i, co := range m.CO {
-				if co == nil {
-					continue
-				}
-				if co.LessThan(*minElem) {
-					minElem = co
-					resolveColumn = i
-				}
-			}
+		if InfinityCycles == -1 && !isOptimal {
+			resolveColumn = m.findMinimumValueInCO()
+		} else {
+			resolveRow = m.findMinimumValueInCO()
 		}
 
 		newTable := &Table{
@@ -184,7 +235,28 @@ func (m *Method) DualMethod() error {
 		m.Table.ZFree = newTable.ZFree
 		m.Table.BasisVars[resolveRow] = resolveColumn
 	}
-	return nil
+}
+
+func (m *Method) findMinimumValueInCO() int {
+	var minElem *fractional.Fraction
+	prepareMinElem := false
+	minIndex := 0
+	for i, co := range m.CO {
+		if co == nil {
+			continue
+		} else {
+			if !prepareMinElem {
+				prepareMinElem = true
+				minElem = co
+				minIndex = i
+			}
+		}
+		if minElem != nil && co.LessThan(*minElem) {
+			minElem = co
+			minIndex = i
+		}
+	}
+	return minIndex
 }
 
 func linearCombinations(table1 *Table, table2 *Table) {
@@ -198,13 +270,13 @@ func linearCombinations(table1 *Table, table2 *Table) {
 	}
 	fmt.Printf("x^(*) = (")
 	for i := range table1.Vars {
-		x1 := findIndex(i, table1)
-		x2 := findIndex(i, table2)
+		x2 := findIndex(i, table1)
+		x1 := findIndex(i, table2)
 		sub := x2.Subtract(*x1)
 		if sub.LessThan(*fractional.ZeroValue) {
-			fmt.Printf("%s + %sλ", x1, sub.Reverse())
+			fmt.Printf("%s%sλ", x1, sub)
 		} else {
-			fmt.Printf("%s - %sλ", x1, sub)
+			fmt.Printf("%s+%sλ", x1, sub)
 		}
 		if i != table1.Vars-1 {
 			fmt.Print("; ")
@@ -215,7 +287,7 @@ func linearCombinations(table1 *Table, table2 *Table) {
 
 func convertZString(t *Table) {
 	for z := range t.Z {
-		if t.IsContainedInBasis(z) && t.Z[z].NotEqual(*fractional.ZeroValue) {
+		if _, ok := t.IsContainedInBasis(z); ok && t.Z[z].NotEqual(*fractional.ZeroValue) {
 			var row int
 			for i := range t.Rows {
 				if t.Matrix[i][z].NotEqual(*fractional.ZeroValue) {
@@ -301,4 +373,25 @@ func (m *Method) methodRectangle(newTable *Table, resolveRow, resolveColumn int)
 	}
 
 	return nil
+}
+
+func (m *Method) printAnswer() {
+	fmt.Printf("\n")
+	if m.Table.IsMinimizationProblem {
+		fmt.Print("Zmin(")
+		m.Table.ZFree = m.Table.ZFree.Reverse()
+	} else {
+		fmt.Print("Zmax(")
+	}
+	for i := range m.Table.Vars {
+		if index, ok := m.Table.IsContainedInBasis(i); ok {
+			fmt.Printf("%s", m.Table.Matrix[index][m.Table.Cols-1])
+		} else {
+			fmt.Print("0")
+		}
+		if i != m.Table.Vars-1 {
+			fmt.Print(";")
+		}
+	}
+	fmt.Printf(") = %s\n", m.Table.ZFree)
 }

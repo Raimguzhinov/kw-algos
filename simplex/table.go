@@ -222,9 +222,38 @@ func normalizeMatrix(matrix [][]*fractional.Fraction) [][]*fractional.Fraction {
 	return result
 }
 
+func (t *Table) previewBasis() error {
+	for i := range t.Rows {
+		for j := range t.Cols - 1 {
+			if t.Matrix[i][j].Equal(*fractional.OneValue) || t.Matrix[i][j].Equal(*fractional.RevOneValue) {
+				t.BasisVars[i] = j
+				if t.Matrix[i][j].Equal(*fractional.RevOneValue) {
+					for col := range t.Cols {
+						t.Matrix[i][col] = t.Matrix[i][col].Multiply(*fractional.RevOneValue)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (t *Table) ToBasis() (*Table, error) {
+	for i := range t.BasisVars {
+		t.BasisVars[i] = -1
+	}
+
+	err := t.previewBasis()
+	if err != nil {
+		return nil, err
+	}
+
 	var columOfResolver int
+
 	for i := 0; i < t.Rows; i++ {
+		if t.BasisVars[i] != -1 {
+			continue
+		}
 		fmt.Println(t)
 
 		t.swapMatrixRows(i, columOfResolver)
@@ -232,7 +261,7 @@ func (t *Table) ToBasis() (*Table, error) {
 		newMatrix := t.CopyMatrix()
 
 		currentColumOfResolver := columOfResolver
-		if t.Matrix[i][currentColumOfResolver].Equal(*fractional.ZeroValue) {
+		if _, ok := t.IsContainedInBasis(currentColumOfResolver); t.Matrix[i][currentColumOfResolver].Equal(*fractional.ZeroValue) || ok {
 			needToCheck = true
 			for j := currentColumOfResolver + 1; j < t.Cols-1; j++ {
 				t.swapMatrixRows(i, j)
@@ -369,13 +398,13 @@ func (t *Table) ToNegativeRightSide() *Table {
 	return t
 }
 
-func (t *Table) IsContainedInBasis(index int) bool {
-	for _, basisVar := range t.BasisVars {
+func (t *Table) IsContainedInBasis(index int) (int, bool) {
+	for i, basisVar := range t.BasisVars {
 		if index == basisVar {
-			return true
+			return i, true
 		}
 	}
-	return false
+	return -1, false
 }
 
 func (t *Table) CopyMatrix() [][]*fractional.Fraction {

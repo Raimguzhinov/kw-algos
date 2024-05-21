@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"kw-algos/simplex"
@@ -8,13 +9,17 @@ import (
 )
 
 func main() {
-	//path := os.Args[1]
-	//_ = path
-	f, err := os.Open("1.txt")
+	var path string
+	flag.StringVar(&path, "p", "test.txt", "(path to file) <filename>.txt")
+	flag.Parse()
+
+	f, err := os.Open(path)
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	defer func(f *os.File) {
+		_ = f.Close()
+	}(f)
 	var r io.Reader
 	r = f
 
@@ -35,6 +40,6 @@ func main() {
 	simplexTable := simplex.New(table)
 
 	if err := simplexTable.DualMethod(); err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 }
